@@ -14,4 +14,4 @@ analysis could show just how much emphasis teams are currently placing on home r
 as they once did during the steroid era. 
 
 ### Data
-The data was collected and gathered from [baseball-reference.com](baseball-reference.com). 
+The data was collected and gathered from [baseball-reference.com](https://baseball-reference.com). 
