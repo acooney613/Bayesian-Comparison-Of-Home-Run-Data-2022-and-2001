@@ -1,0 +1,546 @@
+---
+title: "Bayesian Comparison Of Home Run Data (2022 and 2001)"
+author: "Aidan Cooney"
+date: "2023-04-19"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(rvest)
+library(invgamma)
+
+# code to create the normal-normal-inverse gamma gibbs sampler
+nnig.mcmc <- function(data, m, v, a, b, J) {
+  
+  ybar <- mean(data)
+  s2 <- var(data)
+  n <- length(data)
+
+  # create empty vectors 
+  mu <- numeric()
+  sigma2 <- numeric()
+  
+  # initial values
+  mu[1] <- ybar
+  sigma2[1] <- s2
+
+  J <- 10000
+
+  for (j in 2:J){
+    # update mu
+    mstar <- (n * v * ybar + m * sigma2[j - 1]) / (n * v + sigma2[j - 1])
+    vstar <- (v * sigma2[j - 1]) / (n * v + sigma2[j - 1])
+    mu[j] <- rnorm(1, mstar, sqrt(vstar))
+  
+    # update sigma2
+    astar <- a + 0.5 * n
+    bstar <- b + 0.5 * sum((data - mu[j])^2)
+    sigma2[j] <- rinvgamma(1, astar, bstar)
+  }
+
+  # output the gibbs sampler draws 
+  out <- cbind(mu, sigma2)
+  colnames(out) <- c("mu", "sigma2")
+  out
+}
+
+```
+
+```{r, include = FALSE}
+set.seed(101)
+```
+
+```{r, include = FALSE}
+mlb.2022 <- "https://www.baseball-reference.com/leagues/majors/2022.shtml" %>%
+  read_html() %>%
+  html_node("table") %>%
+  html_table() %>%
+  as_tibble()
+
+mlb.2022 <- mlb.2022[-c(31, 32, 33), ]
+mlb.2022 <- mlb.2022[["HR"]]
+mlb.2022 <- as.numeric(mlb.2022)
+
+mlb.2001 <- "https://www.baseball-reference.com/leagues/majors/2001.shtml" %>%
+  read_html() %>%
+  html_node("table") %>%
+  html_table() %>%
+  as_tibble()
+
+mlb.2001 <- mlb.2001[-c(31, 32, 33), ]
+mlb.2001 <- mlb.2001[["HR"]]
+mlb.2001 <- as.numeric(mlb.2001)
+```
+
+
+```{r, include = FALSE}
+m <- 150
+v <- 400
+a <- 3
+b <- 3200
+J <- 10000
+```
+
+
+## Introduction 
+
+Major league baseball has seen home run numbers rise over the past few seasons, 
+showing that teams appear to be placing an emphasis on players that can hit the 
+ball out of the ballpark. To truly test how high the home run numbers have gotten, 
+I chose to test data from last season (2022) to the home run numbers from a season
+during the height of the steroid era of baseball (2001). The steroid era was 
+between 1994 and 2004, during which numerous players admitted to and tested 
+positive for performance enhancing drugs (PEDS) such as steroids. Through this 
+analysis, I hope to determine if there is a significant difference between the 
+home run numbers in 2022 and the home run numbers in 2001. This 
+analysis could show just how much emphasis teams are currently placing on home runs 
+as they once did during the steroid era. 
+
+## Methods
+
+For this analysis, I found the data on a website called "baseball reference", 
+which contains data collected from each mlb season. I filtered mlb 
+seasons to find the information from 2022, and the information from 2001 to 
+perform my analysis. 
+
+The data model I am using to represent my data in this analysis is a normal-normal-inverse 
+gamma distribution, as both the population mean and variance are 
+unknown parameters. Since both are unknown, using a Gibbs Sampler with the 
+normal-normal-inverse gamma is a reasonable distribution as we would be able to 
+estimate the unknown parameters in our model with reasonable accuracy. 
+The parameters of interest for the likelihood would be the 
+mean and variance for each year.
+
+For my prior belief for $\mu$ I chose a normal distribution with a mean value of 
+150 and a variance of 400 ($\mu \sim N(m = 150, v = 400)$). This is a reasonable 
+prior distribution as this would put the expected value of the prior 
+to be 150 home runs, which appears to be a reasonable prior average per team. 
+
+For my prior belief for $\sigma^2$ I chose an inverse gamma with a shape of 3 and 
+a rate of 3200 ($\sigma^2 \sim IG(a = 3, b = 3200)$). This is a reasonable prior 
+as this would put the expected value for the variance at 1600, making the expected 
+standard deviation around 40 home runs which seems to be a reasonable estimate 
+for the variance. Combining this expected value with that of the expectation for 
+the mean, an interval that is one standard deviation from the mean would be between
+110 to 190 which is where most of the data should be contained. This appears to 
+be a reasonable interval before seeing any data. 
+
+
+## Results
+
+### Posterior For 2022
+
+```{r, include = FALSE}
+post.2022 <- nnig.mcmc(mlb.2022, m, v, a, b, J)
+```
+
+```{r, include = FALSE}
+# code to test for convergence without any burn in 
+plot(post.2022[, 1], type = 'l')
+plot(post.2022[, 2], type = 'l')
+acf(post.2022[,1])
+acf(post.2022[,2])
+
+keep <- 100:J
+
+# code to test for convergence with burn in included 
+plot(post.2022[keep, 1], type = 'l')
+plot(post.2022[keep, 2], type = 'l')
+acf(post.2022[keep, 1])
+acf(post.2022[keep, 2])
+```
+
+```{r, include=FALSE}
+mean(post.2022[keep, 1])
+mean(post.2022[keep, 2])
+
+quantile(post.2022[keep,1], c(0.025, 0.975))
+quantile(post.2022[keep, 2], c(0.025, 0.975))
+```
+
+After performing a Gibbs sampler to draw from the posterior for 2022, the expected 
+value for the mean of our posterior given our prior knowledge and accounting for 
+the data was around 171.62 with an expected variance of around 1262.34, which 
+would make the expected standard deviation around 35.53. 
+
+Looking at the credible interval for the mean, there is a 95% probability that 
+the average number of home runs is between 159.43 and 183.47 home runs given our 
+prior knowledge and accounting for the data. 
+
+Looking next at the credible interval for the variance of the posterior, there is 
+a 95% probability that the variance is between 784.42 and 2013.03 given our prior 
+knowledge and accounting for the data. 
+
+
+```{r, echo = FALSE}
+vals <- seq(90, 230, length = 1001)
+plot(density(post.2022[keep, 1]), xlim = c(90, 230), type = 'l', lwd = 3, 
+     main = "Prior and Posterior for Mean (2022)", xlab = expression(mu))
+lines(vals, dnorm(vals, m, sqrt(v)), type = 'l', col = 'red', lwd = 3)
+legend(x = 'topright', legend = c('Prior', 'Posterior'), col = c('red', 'black'),
+       lty = 1, lwd = 3)
+```
+
+Looking at the prior and posterior plot for the average number of home runs for 
+2022, we can see that the posterior plot is far more peaked with less variability 
+than the prior plot. The posterior distribution is centered around 170 home runs after 
+updating for the data gathered, which is larger than the prior's center of 150 home runs. 
+
+
+```{r, echo = FALSE}
+sig2_vec <- seq(0, 15000, length=1001)
+plot(density(post.2022[keep, 2]), type = 'l', xlim = c(0, 3500), lwd = 3, 
+     main = "Prior and Posterior for sigma2 (2022)", xlab = expression(sigma^2))
+lines(sig2_vec, dinvgamma(sig2_vec, a, b), type = 'l', lwd = 3, col = 'red')
+legend(x = 'topright', legend = c('Prior', 'Posterior'), col = c('red', 'black'),
+       lty = 1, lwd = 3)
+```
+
+Looking at the plots for the prior and posterior distributions for $\sigma^2$ we 
+can see that after updating for the data, the center of the variance has shifted 
+to the right and has a higher peak, with less variability. The expected variance 
+for the posterior is larger than the expected variance for the prior for 2022. 
+
+### Posterior For 2001
+
+```{r, include = FALSE}
+post.2001 <- nnig.mcmc(mlb.2001, m, v, a, b, J)
+```
+
+```{r, include = FALSE}
+# code to test for convergence without any burn in 
+plot(post.2001[, 1], type = 'l')
+plot(post.2001[, 2], type = 'l')
+acf(post.2001[,1])
+acf(post.2001[,2])
+
+keep <- 100:J
+
+# code to test for convergence with burn in included 
+plot(post.2001[keep, 1], type = 'l')
+plot(post.2001[keep, 2], type = 'l')
+acf(post.2001[keep, 1])
+acf(post.2001[keep, 2])
+```
+
+```{r, include = FALSE}
+mean(post.2001[keep, 1])
+mean(post.2001[keep, 2])
+
+quantile(post.2001[keep, 1], c(0.025, 0.975))
+quantile(post.2001[keep, 2], c(0.025, 0.975))
+```
+
+After performing a Gibbs sampler to draw from the posterior for 2001, the expected 
+value for the mean of our posterior given our prior knowledge and accounting for 
+the data was around 179.31 with an expected variance of around 1081.22, which 
+would make the expected standard deviation around 32.88. 
+
+Looking at the credible interval for the mean, there is a 95% probability that 
+the average number of home runs is between 167.93 and 190.55 home runs given our 
+prior knowledge and accounting for the data. 
+
+Looking next at the credible interval for the variance of the posterior, there is 
+a 95% probability that the variance is between 668.05 and 1734.32 given our prior 
+knowledge and accounting for the data. 
+
+```{r, echo = FALSE}
+vals <- seq(90, 230, length = 1001)
+plot(density(post.2001[keep, 1]), xlim = c(90, 230), type = 'l', lwd = 3, 
+     main = "Prior and Posterior for Mean (2001)", xlab = expression(mu))
+lines(vals, dnorm(vals, m, sqrt(v)), type = 'l', col = 'red', lwd = 3)
+legend(x = 'topright', legend = c('Prior', 'Posterior'), col = c('red', 'black'),
+       lty = 1, lwd = 3)
+```
+
+Looking at the plot for the posterior and prior of the mean for 2001, we can see 
+that the posterior distribution has a much higher peak and less variability than 
+the prior distribution. The posterior for the mean is also shifted to the right, 
+as the center of the posterior distribution is around 180 while the prior center 
+is at 150. 
+
+```{r, echo = FALSE}
+sig2_vec <- seq(0, 15000, length=1001)
+plot(density(post.2001[keep, 2]), type = 'l', xlim = c(0, 3500), lwd = 3, 
+     main = "Prior and Posterior for sigma2 (2001)", xlab = expression(sigma^2))
+lines(sig2_vec, dinvgamma(sig2_vec, a, b), type = 'l', lwd = 3, col = 'red')
+legend(x = 'topright', legend = c('Prior', 'Posterior'), col = c('red', 'black'),
+       lty = 1, lwd = 3)
+```
+
+Looking at the prior and posterior distributions for the variance of 2001, we can see 
+that the center of the posterior distribution appears to be shifted slightly to 
+the right, and has a higher peak than the prior distribution. The posterior 
+distribution also appears to have less variablity than the prior distribution. 
+
+
+### Posterior Inference For The Difference (2022 - 2001)
+
+```{r, echo = FALSE}
+plot(density(post.2022[keep, 1] - post.2001[keep, 1]), type = 'l',
+     main = "Difference in Posterior Mean (2022 - 2001)", xlab = "Difference in Mean")
+```
+
+Looking at the plot for the difference in the mean of the posterior distributions 
+for 2022 and 2001, we can see that the center of this plot appears to be around 
+-8, meaning we expect, on average, more home runs for each team in 2001 
+compared to 2022. However, 0 does appear to be within the distribution, so a look at a 
+credible interval can help show if the difference is truly significant. 
+
+```{r, include = FALSE}
+mean(post.2022[keep, 1] - post.2001[keep, 1] < 0)
+
+quantile(post.2022[keep, 1] - post.2001[keep, 1], c(0.025, 0.975))
+```
+
+Looking at the difference in mean home runs (2022 - 2001) the probability that the difference 
+is less than 0 is around 82.35%, meaning that 2001 tended to experience more 
+home runs per team than 2022. Looking at the posterior credible interval however, we get 
+an interval of -23.95 to 8.39 home runs. Since 0 is contained within this interval 
+the difference in means does not appear to be significant. 
+
+```{r, echo = FALSE}
+plot(density(post.2022[keep, 2] / post.2001[keep, 2]), type = 'l',
+     main = "Ratio of Variances (2022 / 2001)", xlab = expression(sigma^2))
+```
+
+Looking at the plot for the ratio of variances (2022 / 2001), the plot appears to 
+be centered slightly above 1, meaning that we would expect the variance for 2022 
+to be slightly larger than 2001 However 1 is contained in the distribution so a look at 
+a credible interval can show significance. 
+
+```{r, include = FALSE}
+mean((post.2022[keep, 2] / post.2001[keep, 2]) > 1)
+
+quantile(post.2022[keep, 2] / post.2001[keep, 2], c(0.025, 0.975))
+```
+
+Looking at the ratio of variances for the posteriors, the probability that the ratio of 
+variances is greater than 1 is about 68.20%, meaning that most of the 
+variances for 2022 are larger than the variances for 2001. However, looking at the 
+posterior credible interval for the ratio of variances, we received an interval of 
+0.59 to 2.25. Since 1 is contained in the interval, there is potentially no 
+significant difference in variances between 2022 and 2001. 
+
+
+## Discussion
+
+After performing a Bayesian analysis on the data from 2022 and 2001, there does 
+not appear to be a significant difference in the means or variances for 2022 
+compared to 2001. This would tell us that the home run numbers for these two years 
+are fairly similar, with a fairly similar spread as well. 
+
+The possible shortcomings for this study would be a limitation on the data. To 
+truly test if home run numbers are the same today as they were during the steroid 
+era there would need to be multiple years tested in order to get the full picture 
+of how much the sport of baseball may or may not have changed. Another test that could help 
+illustrate this idea more clearly would be to compare each years data between 
+2001 and 2022. This would show us if there was a decrease in 
+home runs, and where this potential spike in home runs started up again after 
+the steroid era ended. 
+
+Overall, the analysis performed gave results for no significant difference in 
+the mean and variances for the populations of average number of home runs. The number of 
+home runs each team hit in 2022 and 2001 were roughly the same, meaning that baseball 
+has placed an emphasis on power once again. Home runs are of high value in this 
+modern era of baseball, and this analysis has shown just how valued they are.
+
+## CODE 
+
+```{r, eval = FALSE}
+# libraries used 
+library(tidyverse)
+library(rvest)
+library(invgamma)
+
+# set seed to ensure same rnorm output values while comparing 
+set.seed(101)
+
+# code to create the normal-normal-inverse gamma gibbs sampler
+nnig.mcmc <- function(data, m, v, a, b, J) {
+  
+  ybar <- mean(data)
+  s2 <- var(data)
+  n <- length(data)
+
+  # create empty vectors 
+  mu <- numeric()
+  sigma2 <- numeric()
+  
+  # initial values
+  mu[1] <- ybar
+  sigma2[1] <- s2
+
+  J <- 10000
+
+  for (j in 2:J){
+    # update mu
+    mstar <- (n * v * ybar + m * sigma2[j - 1]) / (n * v + sigma2[j - 1])
+    vstar <- (v * sigma2[j - 1]) / (n * v + sigma2[j - 1])
+    mu[j] <- rnorm(1, mstar, sqrt(vstar))
+  
+    # update sigma2
+    astar <- a + 0.5 * n
+    bstar <- b + 0.5 * sum((data - mu[j])^2)
+    sigma2[j] <- rinvgamma(1, astar, bstar)
+  }
+
+  # output the gibbs sampler draws 
+  out <- cbind(mu, sigma2)
+  colnames(out) <- c("mu", "sigma2")
+  out
+}
+
+# code to read in 2022 dataset
+mlb.2022 <- "https://www.baseball-reference.com/leagues/majors/2022.shtml" %>%
+  read_html() %>%
+  html_node("table") %>%
+  html_table() %>%
+  as_tibble()
+
+# code to grab the necessary column of HR values
+mlb.2022 <- mlb.2022[-c(31, 32, 33), ]
+mlb.2022 <- mlb.2022[["HR"]]
+# code to create this column as a numeric
+mlb.2022 <- as.numeric(mlb.2022)
+
+# code to grab the necessary column of HR values 
+mlb.2001 <- "https://www.baseball-reference.com/leagues/majors/2001.shtml" %>%
+  read_html() %>%
+  html_node("table") %>%
+  html_table() %>%
+  as_tibble()
+
+# code to grab the necessary columnn of HR values 
+mlb.2001 <- mlb.2001[-c(31, 32, 33), ]
+mlb.2001 <- mlb.2001[["HR"]]
+# code to create this column as a numeric 
+mlb.2001 <- as.numeric(mlb.2001)
+
+# code to set up initial values 
+m <- 150
+v <- 400
+a <- 3
+b <- 3200
+J <- 10000
+
+# code to draw from the posterior of 2022
+post.2022 <- nnig.mcmc(mlb.2022, m, v, a, b, J)
+
+# code to test for convergence without any burn in 
+plot(post.2022[, 1], type = 'l')
+plot(post.2022[, 2], type = 'l')
+acf(post.2022[,1])
+acf(post.2022[,2])
+
+keep <- 100:J
+
+# code to test for convergence with burn in included 
+plot(post.2022[keep, 1], type = 'l')
+plot(post.2022[keep, 2], type = 'l')
+acf(post.2022[keep, 1])
+acf(post.2022[keep, 2])
+
+# code to grab the expected mean and variance from the posterior 
+mean(post.2022[keep, 1])
+mean(post.2022[keep, 2])
+
+# code to create 95% credible intervals for the mean and the variance of the posterior 
+quantile(post.2022[keep,1], c(0.025, 0.975))
+quantile(post.2022[keep,2], c(0.025, 0.975))
+
+# code to plot the posterior mean for 2022
+vals <- seq(90, 230, length = 1001)
+plot(density(post.2022[keep, 1]), xlim = c(90, 230), type = 'l', lwd = 3, 
+     main = "Prior and Posterior for Mean (2022)", xlab = expression(mu))
+lines(vals, dnorm(vals, m, sqrt(v)), type = 'l', col = 'red', lwd = 3)
+legend(x = 'topright', legend = c('Prior', 'Posterior'), col = c('red', 'black'),
+       lty = 1, lwd = 3)
+
+# code to plot the posterior variance for 2022
+sig2_vec <- seq(0, 15000, length=1001)
+plot(density(post.2022[keep, 2]), type = 'l', xlim = c(0, 3500), lwd = 3, 
+     main = "Prior and Posterior for sigma2 (2022)", xlab = expression(sigma^2))
+lines(sig2_vec, dinvgamma(sig2_vec, a, b), type = 'l', lwd = 3, col = 'red')
+legend(x = 'topright', legend = c('Prior', 'Posterior'), col = c('red', 'black'),
+       lty = 1, lwd = 3)
+
+# code to draw from the posterior of 2001
+post.2001 <- nnig.mcmc(mlb.2001, m, v, a, b, J)
+
+# code to test for convergence without any burn in 
+plot(post.2001[, 1], type = 'l')
+plot(post.2001[, 2], type = 'l')
+acf(post.2001[,1])
+acf(post.2001[,2])
+
+keep <- 20:J
+
+# code to test for convergence with burn in included 
+plot(post.2001[keep, 1], type = 'l')
+plot(post.2001[keep, 2], type = 'l')
+acf(post.2001[keep, 1])
+acf(post.2001[keep, 2])
+
+# code to grab the expected mean and variance for the posterior
+mean(post.2001[keep, 1])
+mean(post.2001[keep, 2])
+
+# code to create 95% credible intervals for the mean and variance of the posterior
+quantile(post.2001[keep, 1], c(0.025, 0.975))
+quantile(post.2001[keep, 2], c(0.025, 0.975))
+
+# code to plot the mean of the posterior for 2001
+vals <- seq(90, 230, length = 1001)
+plot(density(post.2001[keep, 1]), xlim = c(90, 230), type = 'l', lwd = 3, 
+     main = "Prior and Posterior for Mean (2001)", xlab = expression(mu))
+lines(vals, dnorm(vals, m, sqrt(v)), type = 'l', col = 'red', lwd = 3)
+legend(x = 'topright', legend = c('Prior', 'Posterior'), col = c('red', 'black'),
+       lty = 1, lwd = 3)
+
+# code to plot the variance of the posterior for 2001
+sig2_vec <- seq(0, 15000, length=1001)
+plot(density(post.2001[keep, 2]), type = 'l', xlim = c(0, 3500), lwd = 3, 
+     main = "Prior and Posterior for sigma2 (2001)", xlab = expression(sigma^2))
+lines(sig2_vec, dinvgamma(sig2_vec, a, b), type = 'l', lwd = 3, col = 'red')
+legend(x = 'topright', legend = c('Prior', 'Posterior'), col = c('red', 'black'),
+       lty = 1, lwd = 3)
+
+# code to plot the difference in posterior mean values (2022 - 2001)
+plot(density(post.2022[keep, 1] - post.2001[keep, 1]), type = 'l',
+     main = "Difference in Posterior Mean (2022 - 2001)", xlab = "Difference in Mean")
+
+# code to test probability of difference in mean being less than 0
+mean(post.2022[keep, 1] - post.2001[keep, 1] < 0)
+
+# code to create 95% credible intervals for the difference in mean (2022 - 2001)
+quantile(post.2022[keep, 1] - post.2001[keep, 1], c(0.025, 0.975))
+
+# code to plot the ratio of variances (2022 / 2001)
+plot(density(post.2022[keep, 2] / post.2001[keep, 2]), type = 'l',
+     main = "Ratio of Variances (2022 / 2001)", xlab = expression(sigma^2))
+
+# code to test probability of ratio of variances being greater than 1
+mean((post.2022[keep, 2] / post.2001[keep, 2]) > 1)
+
+# code to create 95% credible intervals for the ratio of variances (2022 / 2001)
+quantile(post.2022[keep, 2] / post.2001[keep, 2], c(0.025, 0.975))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
